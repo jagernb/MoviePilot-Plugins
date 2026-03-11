@@ -26,19 +26,19 @@ lock = Lock()
 
 class RssSubscribe(_PluginBase):
     # 插件名称
-    plugin_name = "自定义订阅"
+    plugin_name = "自定义订阅缓存版"
     # 插件描述
-    plugin_desc = "定时刷新RSS报文，识别内容后添加订阅或直接下载。"
+    plugin_desc = "定时刷新RSS报文，识别内容后加入缓存，在等待窗口内收集同组种子，窗口到期后按优先级规则选出最优版本推送下载。"
     # 插件图标
     plugin_icon = "rss.png"
     # 插件版本
-    plugin_version = "2.1"
+    plugin_version = "2.2"
     # 插件作者
-    plugin_author = "jxxghp"
+    plugin_author = "jxxghp,jager"
     # 作者主页
-    author_url = "https://github.com/jxxghp"
+    author_url = "https://github.com/jagernb/MoviePilot-Plugins"
     # 插件配置项ID前缀
-    plugin_config_prefix = "rsssubscribe_"
+    plugin_config_prefix = "rsssubscribe_jager"
     # 加载顺序
     plugin_order = 19
     # 可使用的用户级别
@@ -63,6 +63,9 @@ class RssSubscribe(_PluginBase):
     _action: str = "subscribe"
     _save_path: str = ""
     _size_range: str = ""
+    _candidate_pool: bool = False
+    _pool_wait_minutes: int = 60
+    _instant_rule_group: str = ""
 
     def init_plugin(self, config: dict = None):
 
@@ -85,6 +88,9 @@ class RssSubscribe(_PluginBase):
             self._action = config.get("action")
             self._save_path = config.get("save_path")
             self._size_range = config.get("size_range")
+            self._candidate_pool = config.get("candidate_pool", False)
+            self._pool_wait_minutes = int(config.get("pool_wait_minutes") or 60)
+            self._instant_rule_group = config.get("instant_rule_group", "")
 
         if self._onlyonce:
             self._scheduler = BackgroundScheduler(timezone=settings.TZ)
@@ -422,6 +428,67 @@ class RssSubscribe(_PluginBase):
                                 ]
                             }
                         ]
+                    },
+                    {
+                        'component': 'VRow',
+                        'content': [
+                            {
+                                'component': 'VCol',
+                                'props': {
+                                    'cols': 12,
+                                    'md': 4
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VSwitch',
+                                        'props': {
+                                            'model': 'candidate_pool',
+                                            'label': '启用候选池',
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {
+                                    'cols': 12,
+                                    'md': 4
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VSelect',
+                                        'props': {
+                                            'model': 'pool_wait_minutes',
+                                            'label': '候选池等待时间',
+                                            'items': [
+                                                {'title': '15分钟', 'value': 15},
+                                                {'title': '30分钟', 'value': 30},
+                                                {'title': '1小时', 'value': 60},
+                                                {'title': '2小时', 'value': 120},
+                                                {'title': '4小时', 'value': 240},
+                                            ]
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {
+                                    'cols': 12,
+                                    'md': 4
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VTextField',
+                                        'props': {
+                                            'model': 'instant_rule_group',
+                                            'label': '即时推送优先级规则组',
+                                            'placeholder': '规则组名称，达标立即推送，留空禁用'
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
                     }
                 ]
             }
@@ -438,7 +505,10 @@ class RssSubscribe(_PluginBase):
             "filter": False,
             "action": "subscribe",
             "save_path": "",
-            "size_range": ""
+            "size_range": "",
+            "candidate_pool": False,
+            "pool_wait_minutes": 60,
+            "instant_rule_group": ""
         }
 
     def get_page(self) -> List[dict]:
@@ -595,7 +665,10 @@ class RssSubscribe(_PluginBase):
             "filter": self._filter,
             "action": self._action,
             "save_path": self._save_path,
-            "size_range": self._size_range
+            "size_range": self._size_range,
+            "candidate_pool": self._candidate_pool,
+            "pool_wait_minutes": self._pool_wait_minutes,
+            "instant_rule_group": self._instant_rule_group
         })
 
     def check(self):
@@ -607,12 +680,29 @@ class RssSubscribe(_PluginBase):
         # 读取历史记录
         if self._clearflag:
             history = []
+            # 同时清理候选池
+            self.save_data('candidate_pool', {})
         else:
             history: List[dict] = self.get_data('history') or []
+
+        # 候选池模式
+        if self._candidate_pool:
+            self.__check_with_pool(history)
+        else:
+            self.__check_direct(history)
+
+        # 保存历史记录
+        self.save_data('history', history)
+        # 缓存只清理一次
+        self._clearflag = False
+
+    def __check_direct(self, history: List[dict]):
+        """
+        原始模式：识别后直接下载或订阅
+        """
         downloadchain = DownloadChain()
         subscribechain = SubscribeChain()
         for url in self._address.split("\n"):
-            # 处理每一个RSS链接
             if not url:
                 continue
             logger.info(f"开始刷新RSS：{url} ...")
@@ -620,9 +710,7 @@ class RssSubscribe(_PluginBase):
             if not results:
                 logger.error(f"未获取到RSS数据：{url}")
                 return
-            # 过滤规则
             filter_groups = self.systemconfig.get(SystemConfigKey.SubscribeFilterRuleGroups)
-            # 解析数据
             for result in results:
                 try:
                     title = result.get("title")
@@ -631,10 +719,8 @@ class RssSubscribe(_PluginBase):
                     link = result.get("link")
                     size = result.get("size")
                     pubdate: datetime.datetime = result.get("pubdate")
-                    # 检查是否处理过
                     if not title or title in [h.get("key") for h in history]:
                         continue
-                    # 检查规则
                     if self._include and not re.search(r"%s" % self._include,
                                                        f"{title} {description}", re.IGNORECASE):
                         logger.info(f"{title} - {description} 不符合包含规则")
@@ -643,6 +729,120 @@ class RssSubscribe(_PluginBase):
                                                    f"{title} {description}", re.IGNORECASE):
                         logger.info(f"{title} - {description} 不符合排除规则")
                         continue
+                    if self._size_range:
+                        sizes = [float(_size) * 1024 ** 3 for _size in self._size_range.split("-")]
+                        if len(sizes) == 1 and float(size) < sizes[0]:
+                            logger.info(f"{title} - 种子大小不符合条件")
+                            continue
+                        elif len(sizes) > 1 and not sizes[0] <= float(size) <= sizes[1]:
+                            logger.info(f"{title} - 种子大小不在指定范围")
+                            continue
+                    meta = MetaInfo(title=title, subtitle=description)
+                    if not meta.name:
+                        logger.warn(f"{title} 未识别到有效数据")
+                        continue
+                    mediainfo: MediaInfo = self.chain.recognize_media(meta=meta)
+                    if not mediainfo:
+                        logger.warn(f'未识别到媒体信息，标题：{title}')
+                        continue
+                    torrentinfo = TorrentInfo(
+                        title=title,
+                        description=description,
+                        enclosure=enclosure,
+                        page_url=link,
+                        size=size,
+                        pubdate=pubdate.strftime("%Y-%m-%d %H:%M:%S") if pubdate else None,
+                        site_proxy=self._proxy,
+                    )
+                    if self._filter:
+                        result = self.chain.filter_torrents(
+                            rule_groups=filter_groups,
+                            torrent_list=[torrentinfo],
+                            mediainfo=mediainfo
+                        )
+                        if not result:
+                            logger.info(f"{title} {description} 不匹配过滤规则")
+                            continue
+                    if self.__check_media_exists(mediainfo, meta):
+                        continue
+                    if self._action == "download":
+                        result = downloadchain.download_single(
+                            context=Context(
+                                meta_info=meta,
+                                media_info=mediainfo,
+                                torrent_info=torrentinfo,
+                            ),
+                            save_path=self._save_path,
+                            username="RSS订阅"
+                        )
+                        if not result:
+                            logger.error(f'{title} 下载失败')
+                            continue
+                    else:
+                        subflag = subscribechain.exists(mediainfo=mediainfo, meta=meta)
+                        if subflag:
+                            logger.info(f'{mediainfo.title_year} {meta.season} 正在订阅中')
+                            continue
+                        subscribechain.add(title=mediainfo.title,
+                                           year=mediainfo.year,
+                                           mtype=mediainfo.type,
+                                           tmdbid=mediainfo.tmdb_id,
+                                           season=meta.begin_season,
+                                           exist_ok=True,
+                                           username="RSS订阅")
+                    history.append({
+                        "title": f"{mediainfo.title} {meta.season}",
+                        "key": f"{title}",
+                        "type": mediainfo.type.value,
+                        "year": mediainfo.year,
+                        "poster": mediainfo.get_poster_image(),
+                        "overview": mediainfo.overview,
+                        "tmdbid": mediainfo.tmdb_id,
+                        "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    })
+                except Exception as err:
+                    logger.error(f'刷新RSS数据出错：{str(err)} - {traceback.format_exc()}')
+            logger.info(f"RSS {url} 刷新完成")
+
+    def __check_with_pool(self, history: List[dict]):
+        """
+        候选池模式：识别后进入候选池，等待窗口到期后择优推送
+        """
+        candidate_pool: dict = self.get_data('candidate_pool') or {}
+        filter_groups = self.systemconfig.get(SystemConfigKey.SubscribeFilterRuleGroups)
+        history_keys = set(h.get("key") for h in history)
+
+        for url in self._address.split("\n"):
+            if not url:
+                continue
+            logger.info(f"开始刷新RSS（候选池模式）：{url} ...")
+            results = RssHelper().parse(url, proxy=self._proxy)
+            if not results:
+                logger.error(f"未获取到RSS数据：{url}")
+                continue
+            for result in results:
+                try:
+                    title = result.get("title")
+                    description = result.get("description")
+                    enclosure = result.get("enclosure")
+                    link = result.get("link")
+                    size = result.get("size")
+                    pubdate: datetime.datetime = result.get("pubdate")
+                    # 跳过已处理或已在候选池中的
+                    if not title or title in history_keys:
+                        continue
+                    if self.__is_in_candidate_pool(title, candidate_pool):
+                        continue
+                    # 包含/排除规则
+                    if self._include and not re.search(r"%s" % self._include,
+                                                       f"{title} {description}", re.IGNORECASE):
+                        logger.info(f"{title} - {description} 不符合包含规则")
+                        continue
+                    if self._exclude and re.search(r"%s" % self._exclude,
+                                                   f"{title} {description}", re.IGNORECASE):
+                        logger.info(f"{title} - {description} 不符合排除规则")
+                        continue
+                    # 种子大小过滤
                     if self._size_range:
                         sizes = [float(_size) * 1024 ** 3 for _size in self._size_range.split("-")]
                         if len(sizes) == 1 and float(size) < sizes[0]:
@@ -660,7 +860,7 @@ class RssSubscribe(_PluginBase):
                     if not mediainfo:
                         logger.warn(f'未识别到媒体信息，标题：{title}')
                         continue
-                    # 种子
+                    # 构建种子信息
                     torrentinfo = TorrentInfo(
                         title=title,
                         description=description,
@@ -670,63 +870,231 @@ class RssSubscribe(_PluginBase):
                         pubdate=pubdate.strftime("%Y-%m-%d %H:%M:%S") if pubdate else None,
                         site_proxy=self._proxy,
                     )
-                    # 过滤种子
+                    # 基础过滤规则
                     if self._filter:
-                        result = self.chain.filter_torrents(
+                        filter_result = self.chain.filter_torrents(
                             rule_groups=filter_groups,
                             torrent_list=[torrentinfo],
                             mediainfo=mediainfo
                         )
-                        if not result:
+                        if not filter_result:
                             logger.info(f"{title} {description} 不匹配过滤规则")
                             continue
-                    # 媒体库已存在的剧集
-                    exist_info: Optional[ExistMediaInfo] = self.chain.media_exists(mediainfo=mediainfo)
-                    if mediainfo.type == MediaType.TV:
-                        if exist_info:
-                            exist_season = exist_info.seasons
-                            if exist_season:
-                                exist_episodes = exist_season.get(meta.begin_season)
-                                if exist_episodes and set(meta.episode_list).issubset(set(exist_episodes)):
-                                    logger.info(f'{mediainfo.title_year} {meta.season_episode} 己存在')
-                                    continue
-                    elif exist_info:
-                        # 电影已存在
-                        logger.info(f'{mediainfo.title_year} 己存在')
+                    # Emby库去重
+                    if self.__check_media_exists(mediainfo, meta):
                         continue
-                    # 下载或订阅
-                    if self._action == "download":
-                        # 添加下载
-                        result = downloadchain.download_single(
-                            context=Context(
-                                meta_info=meta,
-                                media_info=mediainfo,
-                                torrent_info=torrentinfo,
-                            ),
-                            save_path=self._save_path,
-                            username="RSS订阅"
+                    # 即时推送检查：匹配高优先级规则组则立即推送
+                    if self._instant_rule_group:
+                        instant_result = self.chain.filter_torrents(
+                            rule_groups=self._instant_rule_group,
+                            torrent_list=[torrentinfo],
+                            mediainfo=mediainfo
                         )
-                        if not result:
-                            logger.error(f'{title} 下载失败')
+                        if instant_result:
+                            logger.info(f"{title} 匹配即时推送规则，立即推送")
+                            success = self.__push_torrent(meta=meta, mediainfo=mediainfo,
+                                                          torrentinfo=torrentinfo)
+                            if success:
+                                history.append({
+                                    "title": f"{mediainfo.title} {meta.season}",
+                                    "key": f"{title}",
+                                    "type": mediainfo.type.value,
+                                    "year": mediainfo.year,
+                                    "poster": mediainfo.get_poster_image(),
+                                    "overview": mediainfo.overview,
+                                    "tmdbid": mediainfo.tmdb_id,
+                                    "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                })
+                                history_keys.add(title)
+                                # 清除该分组的其他候选
+                                group_key = self.__build_group_key(mediainfo, meta)
+                                candidate_pool.pop(group_key, None)
                             continue
+                    # 加入候选池
+                    group_key = self.__build_group_key(mediainfo, meta)
+                    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    if group_key not in candidate_pool:
+                        candidate_pool[group_key] = {
+                            "first_seen": now_str,
+                            "candidates": []
+                        }
+                    # 单组候选上限50
+                    if len(candidate_pool[group_key]["candidates"]) >= 50:
+                        logger.warn(f"候选池分组 {group_key} 候选数已达上限，跳过 {title}")
+                        continue
+                    candidate_pool[group_key]["candidates"].append({
+                        "title": title,
+                        "description": description,
+                        "enclosure": enclosure,
+                        "link": link,
+                        "size": size,
+                        "pubdate": pubdate.strftime("%Y-%m-%d %H:%M:%S") if pubdate else None,
+                        "added_time": now_str
+                    })
+                    logger.info(f"{title} 已加入候选池，分组：{group_key}，"
+                                f"当前候选数：{len(candidate_pool[group_key]['candidates'])}")
+                except Exception as err:
+                    logger.error(f'刷新RSS数据出错：{str(err)} - {traceback.format_exc()}')
+            logger.info(f"RSS {url} 刷新完成")
+
+        # 保存候选池
+        self.save_data('candidate_pool', candidate_pool)
+        # 评估到期分组
+        self.__process_candidate_pool(history)
+
+    def __push_torrent(self, meta: MetaInfo, mediainfo: MediaInfo, torrentinfo: TorrentInfo) -> bool:
+        """
+        执行下载或订阅操作，成功返回True
+        """
+        if self._action == "download":
+            result = DownloadChain().download_single(
+                context=Context(
+                    meta_info=meta,
+                    media_info=mediainfo,
+                    torrent_info=torrentinfo,
+                ),
+                save_path=self._save_path,
+                username="RSS订阅"
+            )
+            if not result:
+                logger.error(f'{torrentinfo.title} 下载失败')
+                return False
+            return True
+        else:
+            subscribechain = SubscribeChain()
+            subflag = subscribechain.exists(mediainfo=mediainfo, meta=meta)
+            if subflag:
+                logger.info(f'{mediainfo.title_year} {meta.season} 正在订阅中')
+                return False
+            subscribechain.add(
+                title=mediainfo.title,
+                year=mediainfo.year,
+                mtype=mediainfo.type,
+                tmdbid=mediainfo.tmdb_id,
+                season=meta.begin_season,
+                exist_ok=True,
+                username="RSS订阅"
+            )
+            return True
+
+    @staticmethod
+    def __build_group_key(mediainfo: MediaInfo, meta: MetaInfo) -> str:
+        """
+        构建候选池分组key
+        """
+        if mediainfo.type == MediaType.TV:
+            episodes = "-".join(str(e) for e in sorted(meta.episode_list or []))
+            return f"tv_{mediainfo.tmdb_id}_s{meta.begin_season}_e{episodes}"
+        return f"movie_{mediainfo.tmdb_id}"
+
+    def __check_media_exists(self, mediainfo: MediaInfo, meta: MetaInfo) -> bool:
+        """
+        检查媒体库是否已存在，存在返回True
+        """
+        exist_info: Optional[ExistMediaInfo] = self.chain.media_exists(mediainfo=mediainfo)
+        if mediainfo.type == MediaType.TV:
+            if exist_info:
+                exist_season = exist_info.seasons
+                if exist_season:
+                    exist_episodes = exist_season.get(meta.begin_season)
+                    if exist_episodes and set(meta.episode_list).issubset(set(exist_episodes)):
+                        logger.info(f'{mediainfo.title_year} {meta.season_episode} 己存在')
+                        return True
+        elif exist_info:
+            logger.info(f'{mediainfo.title_year} 己存在')
+            return True
+        return False
+
+    def __is_in_candidate_pool(self, title: str, candidate_pool: dict) -> bool:
+        """
+        检查种子是否已在候选池中
+        """
+        for group_data in candidate_pool.values():
+            for c in group_data.get("candidates", []):
+                if c.get("title") == title:
+                    return True
+        return False
+
+    def __process_candidate_pool(self, history: List[dict]):
+        """
+        评估候选池中等待窗口已过期的分组，选择最优版本推送
+        """
+        candidate_pool: dict = self.get_data('candidate_pool') or {}
+        if not candidate_pool:
+            return
+
+        now = datetime.datetime.now()
+        wait_minutes = self._pool_wait_minutes
+        groups_to_remove = []
+        filter_groups = self.systemconfig.get(SystemConfigKey.SubscribeFilterRuleGroups)
+
+        for group_key, group_data in candidate_pool.items():
+            try:
+                first_seen = datetime.datetime.strptime(group_data["first_seen"], "%Y-%m-%d %H:%M:%S")
+                elapsed = (now - first_seen).total_seconds() / 60
+
+                if elapsed < wait_minutes:
+                    logger.debug(f"候选池分组 {group_key} 等待中，已等待 {elapsed:.0f}/{wait_minutes} 分钟")
+                    continue
+
+                candidates = group_data.get("candidates", [])
+                logger.info(f"候选池分组 {group_key} 等待窗口已过期，开始评估 {len(candidates)} 个候选...")
+
+                if not candidates:
+                    groups_to_remove.append(group_key)
+                    continue
+
+                # 用第一个候选重建 MetaInfo 和 MediaInfo
+                first_c = candidates[0]
+                meta = MetaInfo(title=first_c["title"], subtitle=first_c.get("description"))
+                mediainfo = self.chain.recognize_media(meta=meta)
+                if not mediainfo:
+                    logger.warn(f"候选池分组 {group_key} 无法识别媒体信息，清除分组")
+                    groups_to_remove.append(group_key)
+                    continue
+
+                # 再次检查媒体库（等待期间可能已入库）
+                if self.__check_media_exists(mediainfo, meta):
+                    logger.info(f"候选池 {group_key}: 媒体库已存在，跳过")
+                    groups_to_remove.append(group_key)
+                    continue
+
+                # 重建所有候选的 TorrentInfo
+                torrent_list = []
+                for c in candidates:
+                    ti = TorrentInfo(
+                        title=c["title"],
+                        description=c.get("description"),
+                        enclosure=c.get("enclosure"),
+                        page_url=c.get("link"),
+                        size=c.get("size"),
+                        pubdate=c.get("pubdate"),
+                        site_proxy=self._proxy,
+                    )
+                    torrent_list.append(ti)
+
+                # 用优先级规则排序选最优
+                best_torrent = torrent_list[0]
+                if self._filter and filter_groups and len(torrent_list) > 1:
+                    sorted_results = self.chain.filter_torrents(
+                        rule_groups=filter_groups,
+                        torrent_list=torrent_list,
+                        mediainfo=mediainfo
+                    )
+                    if sorted_results:
+                        best_torrent = sorted_results[0]
                     else:
-                        # 检查是否在订阅中
-                        subflag = subscribechain.exists(mediainfo=mediainfo, meta=meta)
-                        if subflag:
-                            logger.info(f'{mediainfo.title_year} {meta.season} 正在订阅中')
-                            continue
-                        # 添加订阅
-                        subscribechain.add(title=mediainfo.title,
-                                           year=mediainfo.year,
-                                           mtype=mediainfo.type,
-                                           tmdbid=mediainfo.tmdb_id,
-                                           season=meta.begin_season,
-                                           exist_ok=True,
-                                           username="RSS订阅")
-                    # 存储历史记录
+                        logger.info(f"候选池 {group_key}: 所有候选均不匹配过滤规则，取首个候选")
+
+                # 重建最优种子的 MetaInfo
+                best_meta = MetaInfo(title=best_torrent.title, subtitle=best_torrent.description)
+
+                # 推送
+                success = self.__push_torrent(meta=best_meta, mediainfo=mediainfo, torrentinfo=best_torrent)
+                if success:
                     history.append({
-                        "title": f"{mediainfo.title} {meta.season}",
-                        "key": f"{title}",
+                        "title": f"{mediainfo.title} {best_meta.season}",
+                        "key": f"{best_torrent.title}",
                         "type": mediainfo.type.value,
                         "year": mediainfo.year,
                         "poster": mediainfo.get_poster_image(),
@@ -734,13 +1102,20 @@ class RssSubscribe(_PluginBase):
                         "tmdbid": mediainfo.tmdb_id,
                         "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     })
-                except Exception as err:
-                    logger.error(f'刷新RSS数据出错：{str(err)} - {traceback.format_exc()}')
-            logger.info(f"RSS {url} 刷新完成")
-        # 保存历史记录
-        self.save_data('history', history)
-        # 缓存只清理一次
-        self._clearflag = False
+                    logger.info(f"候选池 {group_key}: 已推送最优版本 {best_torrent.title}")
+                    groups_to_remove.append(group_key)
+                else:
+                    logger.warn(f"候选池 {group_key}: 推送失败 {best_torrent.title}，保留分组待重试")
+
+            except Exception as err:
+                logger.error(f"候选池分组 {group_key} 处理出错：{str(err)} - {traceback.format_exc()}")
+                groups_to_remove.append(group_key)
+
+        # 清理已处理的分组
+        for key in groups_to_remove:
+            candidate_pool.pop(key, None)
+
+        self.save_data('candidate_pool', candidate_pool)
 
     def __log_and_notify_error(self, message):
         """

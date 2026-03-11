@@ -28,7 +28,7 @@ class RssSubscribe(_PluginBase):
     # 插件名称
     plugin_name = "自定义订阅缓存版"
     # 插件描述
-    plugin_desc = "定时刷新RSS报文，识别内容后加入缓存，在等待窗口内收集同组种子，窗口到期后按优先级规则选出最优版本推送下载。"
+    plugin_desc = "定时刷新RSS报文，识别内容后加入缓存，在等待窗口内收集同组种子，窗口到期后按优先级规则选出最优版本推送下载。附带对比emby库去重"
     # 插件图标
     plugin_icon = "rss.png"
     # 插件版本

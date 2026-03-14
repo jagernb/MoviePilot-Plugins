@@ -20,19 +20,19 @@ lock = threading.Lock()
 
 class TorrentRemover(_PluginBase):
     # 插件名称
-    plugin_name = "自动删种"
+    plugin_name = "自动删种辅种版"
     # 插件描述
-    plugin_desc = "自动删除下载器中的下载任务。"
+    plugin_desc = "自动删除下载器中的下载任务,所有辅种满足条件后自动删除。"
     # 插件图标
     plugin_icon = "delete.jpg"
     # 插件版本
-    plugin_version = "2.2"
+    plugin_version = "2.3"
     # 插件作者
-    plugin_author = "jxxghp"
+    plugin_author = "jxxghp,jager"
     # 作者主页
-    author_url = "https://github.com/jxxghp"
+    author_url = "https://github.com/jagernb/MoviePilot-Plugins"
     # 插件配置项ID前缀
-    plugin_config_prefix = "torrentremover_"
+    plugin_config_prefix = "torrentremover_de"
     # 加载顺序
     plugin_order = 8
     # 可使用的用户级别
@@ -60,6 +60,8 @@ class TorrentRemover(_PluginBase):
     _errorkeywords = None
     _torrentstates = None
     _torrentcategorys = None
+    _groupcheck = False
+    _lastactive = None
 
     def init_plugin(self, config: dict = None):
 
@@ -82,6 +84,8 @@ class TorrentRemover(_PluginBase):
             self._errorkeywords = config.get("errorkeywords") or ""
             self._torrentstates = config.get("torrentstates") or ""
             self._torrentcategorys = config.get("torrentcategorys") or ""
+            self._groupcheck = config.get("groupcheck", False)
+            self._lastactive = config.get("lastactive")
 
         self.stop_service()
 
@@ -114,7 +118,9 @@ class TorrentRemover(_PluginBase):
                     "trackerkeywords": self._trackerkeywords,
                     "errorkeywords": self._errorkeywords,
                     "torrentstates": self._torrentstates,
-                    "torrentcategorys": self._torrentcategorys
+                    "torrentcategorys": self._torrentcategorys,
+                    "groupcheck": self._groupcheck,
+                    "lastactive": self._lastactive
 
                 })
                 if self._scheduler.get_jobs():
@@ -339,6 +345,22 @@ class TorrentRemover(_PluginBase):
                                     {
                                         'component': 'VTextField',
                                         'props': {
+                                            'model': 'lastactive',
+                                            'label': '最后活动时间（小时）',
+                                            'placeholder': '距最后活动超过该时长才删除'
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {
+                                    'cols': 6
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VTextField',
+                                        'props': {
                                             'model': 'labels',
                                             'label': '标签',
                                             'placeholder': '用,分隔多个标签'
@@ -488,6 +510,48 @@ class TorrentRemover(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
+                                    'md': 4
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VSwitch',
+                                        'props': {
+                                            'model': 'groupcheck',
+                                            'label': '分组校验',
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        'component': 'VRow',
+                        'content': [
+                            {
+                                'component': 'VCol',
+                                'props': {
+                                    'cols': 12,
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VAlert',
+                                        'props': {
+                                            'type': 'info',
+                                            'variant': 'tonal',
+                                            'text': '分组校验：将种子名称和大小都一致的种子视为一组，只有当组内所有种子都满足删种条件时才会删除。开启后将忽略"处理辅种"选项。'
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        'component': 'VRow',
+                        'content': [
+                            {
+                                'component': 'VCol',
+                                'props': {
+                                    'cols': 12,
                                 },
                                 'content': [
                                     {
@@ -562,7 +626,9 @@ class TorrentRemover(_PluginBase):
             "trackerkeywords": "",
             "errorkeywords": "",
             "torrentstates": "",
-            "torrentcategorys": ""
+            "torrentcategorys": "",
+            "groupcheck": False,
+            "lastactive": ""
         }
 
     def get_page(self) -> List[dict]:
@@ -721,6 +787,12 @@ class TorrentRemover(_PluginBase):
             return None
         if self._torrentcategorys and (not torrent.category or torrent.category not in self._torrentcategorys):
             return None
+        # 最后活动时间 单位：小时
+        if self._lastactive:
+            last_activity = torrent.last_activity if torrent.last_activity > 0 else date_done
+            inactive_time = date_now - last_activity if last_activity else 0
+            if inactive_time <= float(self._lastactive) * 3600:
+                return None
         return {
             "id": torrent.hash,
             "name": torrent.name,
@@ -770,6 +842,12 @@ class TorrentRemover(_PluginBase):
                     return None
         if self._errorkeywords and not re.findall(self._errorkeywords, torrent.error_string, re.I):
             return None
+        # 最后活动时间 单位：小时
+        if self._lastactive:
+            activity_date = torrent.activity_date or date_done
+            inactive_time = date_now - int(time.mktime(activity_date.timetuple())) if activity_date else 0
+            if inactive_time <= float(self._lastactive) * 3600:
+                return None
         return {
             "id": torrent.hashString,
             "name": torrent.name,
@@ -805,8 +883,31 @@ class TorrentRemover(_PluginBase):
             if not item:
                 continue
             remove_torrents.append(item)
-        # 处理辅种
-        if self._samedata and remove_torrents:
+        # 分组校验：同名同大小种子全部达标才删除
+        if self._groupcheck and remove_torrents:
+            # 统计所有种子按 (name, size) 分组的总数
+            group_total: Dict[Tuple[str, int], int] = {}
+            for torrent in torrents:
+                if downloader_config.type == "qbittorrent":
+                    t_name, t_size = torrent.name, torrent.size
+                else:
+                    t_name, t_size = torrent.name, torrent.total_size
+                key = (t_name, t_size)
+                group_total[key] = group_total.get(key, 0) + 1
+            # 统计达标种子按 (name, size) 分组的数量
+            group_qualified: Dict[Tuple[str, int], int] = {}
+            for item in remove_torrents:
+                key = (item.get("name"), item.get("size"))
+                group_qualified[key] = group_qualified.get(key, 0) + 1
+            # 过滤：只保留组内全部达标的种子
+            remove_torrents = [
+                item for item in remove_torrents
+                if group_qualified.get((item.get("name"), item.get("size")), 0)
+                   >= group_total.get((item.get("name"), item.get("size")), 0)
+            ]
+            logger.info(f"分组校验后符合条件种子数 {len(remove_torrents)}")
+        # 处理辅种（分组校验开启时跳过）
+        elif self._samedata and remove_torrents:
             remove_ids = [t.get("id") for t in remove_torrents]
             remove_torrents_plus = []
             for remove_torrent in remove_torrents:

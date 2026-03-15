@@ -33,7 +33,7 @@
     "name": "整理文件大小统计",
     "description": "统计已整理文件的总大小，支持多时间范围统计和阈值通知",
     "labels": "统计",
-    "version": "1.0",
+    "version": "1.1",
     "icon": "statistic.png",
     "author": "jager",
     "level": 1,

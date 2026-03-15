@@ -28,5 +28,17 @@
       "v2.1.1": "修复兼容MoviePilot V2 版本",
       "v2.0": "兼容MoviePilot V2 版本"
     }
+  },
+  "TransferSizeStatistic": {
+    "name": "整理文件大小统计",
+    "description": "统计已整理文件的总大小，支持多时间范围统计和阈值通知",
+    "labels": "统计",
+    "version": "1.0",
+    "icon": "statistic.png",
+    "author": "jager",
+    "level": 1,
+    "history": {
+      "v1.0": "初始版本"
+    }
   }
 }

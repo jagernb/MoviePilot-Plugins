@@ -24,7 +24,7 @@ class TransferSizeStatistic(_PluginBase):
     # 插件图标
     plugin_icon = "statistic.png"
     # 插件版本
-    plugin_version = "1.0"
+    plugin_version = "1.1"
     # 插件作者
     plugin_author = "jager"
     # 作者主页
@@ -263,7 +263,7 @@ class TransferSizeStatistic(_PluginBase):
                 if last_notify != today_str:
                     self.save_data("last_threshold_notify", today_str)
                     self.post_message(
-                        mtype=NotificationType.Plugin,
+                        mtype=NotificationType.SiteMessage,
                         title="【整理文件大小统计 - 阈值告警】",
                         text=f"滚动24小时内整理文件总大小已达 {size_24h_gb:.2f} GB，"
                              f"超过阈值 {self._threshold_gb} GB"
@@ -309,7 +309,7 @@ class TransferSizeStatistic(_PluginBase):
 
         if self._notify:
             self.post_message(
-                mtype=NotificationType.Plugin,
+                mtype=NotificationType.SiteMessage,
                 title="【整理文件大小统计】",
                 text=text
             )

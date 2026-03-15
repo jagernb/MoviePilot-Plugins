@@ -31,14 +31,15 @@
   },
   "TransferSizeStatistic": {
     "name": "整理文件大小统计",
-    "description": "统计已整理文件的总大小，支持多时间范围统计和阈值通知",
+    "description": "统计已整理文件的总大小，仪表盘展示多时间范围数据，支持阈值通知",
     "labels": "统计",
-    "version": "1.1",
+    "version": "2.0",
     "icon": "statistic.png",
     "author": "jager",
     "level": 2,
     "history": {
-      "v1.1": "修复bug",
+      "v2.0": "仪表盘直接展示4种统计数据，移除time_ranges选择",
+      "v1.1": "修复通知类型",
       "v1.0": "初始版本"
     }
   }

@@ -20,11 +20,11 @@ class TransferSizeStatistic(_PluginBase):
     # 插件名称
     plugin_name = "整理文件大小统计"
     # 插件描述
-    plugin_desc = "统计已整理文件的总大小，支持多时间范围统计和阈值通知。"
+    plugin_desc = "统计已整理文件的总大小，仪表盘展示多时间范围数据，支持阈值通知。"
     # 插件图标
     plugin_icon = "statistic.png"
     # 插件版本
-    plugin_version = "1.1"
+    plugin_version = "2.0"
     # 插件作者
     plugin_author = "jager"
     # 作者主页
@@ -42,16 +42,15 @@ class TransferSizeStatistic(_PluginBase):
     _onlyonce = False
     _notify = False
     _cron = None
-    _time_ranges = []
     _threshold_enabled = False
     _threshold_gb = 0
+
     def init_plugin(self, config: dict = None):
         if config:
             self._enabled = config.get("enabled", False)
             self._onlyonce = config.get("onlyonce", False)
             self._notify = config.get("notify", False)
             self._cron = config.get("cron")
-            self._time_ranges = config.get("time_ranges") or []
             self._threshold_enabled = config.get("threshold_enabled", False)
             self._threshold_gb = float(config.get("threshold_gb") or 0)
 
@@ -71,7 +70,6 @@ class TransferSizeStatistic(_PluginBase):
                 "onlyonce": False,
                 "notify": self._notify,
                 "cron": self._cron,
-                "time_ranges": self._time_ranges,
                 "threshold_enabled": self._threshold_enabled,
                 "threshold_gb": self._threshold_gb,
             })
@@ -99,6 +97,7 @@ class TransferSizeStatistic(_PluginBase):
                 "kwargs": {}
             }]
         return []
+
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         return [
             {
@@ -109,7 +108,7 @@ class TransferSizeStatistic(_PluginBase):
                         'content': [
                             {
                                 'component': 'VCol',
-                                'props': {'cols': 12, 'md': 4},
+                                'props': {'cols': 12, 'md': 3},
                                 'content': [{
                                     'component': 'VSwitch',
                                     'props': {'model': 'enabled', 'label': '启用插件'}
@@ -117,7 +116,7 @@ class TransferSizeStatistic(_PluginBase):
                             },
                             {
                                 'component': 'VCol',
-                                'props': {'cols': 12, 'md': 4},
+                                'props': {'cols': 12, 'md': 3},
                                 'content': [{
                                     'component': 'VSwitch',
                                     'props': {'model': 'notify', 'label': '发送通知'}
@@ -125,7 +124,15 @@ class TransferSizeStatistic(_PluginBase):
                             },
                             {
                                 'component': 'VCol',
-                                'props': {'cols': 12, 'md': 4},
+                                'props': {'cols': 12, 'md': 3},
+                                'content': [{
+                                    'component': 'VSwitch',
+                                    'props': {'model': 'threshold_enabled', 'label': '启用24h阈值通知'}
+                                }]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 3},
                                 'content': [{
                                     'component': 'VSwitch',
                                     'props': {'model': 'onlyonce', 'label': '立即运行一次'}
@@ -143,7 +150,7 @@ class TransferSizeStatistic(_PluginBase):
                                     'component': 'VTextField',
                                     'props': {
                                         'model': 'cron',
-                                        'label': '执行周期',
+                                        'label': '通知周期',
                                         'placeholder': '5位cron表达式，如 0 8 * * *'
                                     }
                                 }]
@@ -151,41 +158,6 @@ class TransferSizeStatistic(_PluginBase):
                             {
                                 'component': 'VCol',
                                 'props': {'cols': 12, 'md': 6},
-                                'content': [{
-                                    'component': 'VSelect',
-                                    'props': {
-                                        'model': 'time_ranges',
-                                        'label': '统计范围',
-                                        'multiple': True,
-                                        'chips': True,
-                                        'items': [
-                                            {'title': '滚动24小时', 'value': '24h'},
-                                            {'title': '今日（自然日）', 'value': 'today'},
-                                            {'title': '最近7天', 'value': '7d'},
-                                            {'title': '最近30天', 'value': '30d'}
-                                        ]
-                                    }
-                                }]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 4},
-                                'content': [{
-                                    'component': 'VSwitch',
-                                    'props': {
-                                        'model': 'threshold_enabled',
-                                        'label': '启用24h阈值通知'
-                                    }
-                                }]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 8},
                                 'content': [{
                                     'component': 'VTextField',
                                     'props': {
@@ -207,8 +179,8 @@ class TransferSizeStatistic(_PluginBase):
                                 'props': {
                                     'type': 'info',
                                     'variant': 'tonal',
-                                    'text': '注意：本插件只能统计启用后的整理记录，'
-                                            '通过监听整理完成事件来记录文件大小。'
+                                    'text': '仪表盘直接展示4种统计数据（滚动24小时/今日/7天/30天）。'
+                                            '通知周期控制定时发送通知的频率，留空则不定时通知。'
                                 }
                             }]
                         }]
@@ -220,13 +192,78 @@ class TransferSizeStatistic(_PluginBase):
             "onlyonce": False,
             "notify": False,
             "cron": "",
-            "time_ranges": ["24h"],
             "threshold_enabled": False,
             "threshold_gb": 0,
         }
 
     def get_page(self) -> List[dict]:
         pass
+
+    def get_dashboard(self, key: str, **kwargs) -> Optional[Tuple[Dict[str, Any], Dict[str, Any], List[dict]]]:
+        """
+        获取插件仪表盘页面
+        """
+        cols = {"cols": 12}
+        attrs = {"refresh": 300}
+        records = self.get_data("transfer_records") or []
+        stats = {
+            "24h": ("滚动24小时", "mdi-hours-24"),
+            "today": ("今日（自然日）", "mdi-calendar-today"),
+            "7d": ("最近7天", "mdi-calendar-week"),
+            "30d": ("最近30天", "mdi-calendar-month"),
+        }
+        card_elements = []
+        for rk, (label, icon) in stats.items():
+            total = self._calc_size(records, rk)
+            gb = total / 1073741824
+            card_elements.append({
+                'component': 'VCol',
+                'props': {'cols': 6, 'md': 3},
+                'content': [{
+                    'component': 'VCard',
+                    'props': {'variant': 'tonal'},
+                    'content': [{
+                        'component': 'VCardText',
+                        'props': {'class': 'd-flex align-center'},
+                        'content': [
+                            {
+                                'component': 'VAvatar',
+                                'props': {
+                                    'rounded': True,
+                                    'variant': 'text',
+                                    'class': 'me-3'
+                                },
+                                'content': [{
+                                    'component': 'VIcon',
+                                    'props': {'icon': icon}
+                                }]
+                            },
+                            {
+                                'component': 'div',
+                                'content': [
+                                    {
+                                        'component': 'span',
+                                        'props': {'class': 'text-caption'},
+                                        'text': label
+                                    },
+                                    {
+                                        'component': 'div',
+                                        'props': {'class': 'd-flex align-center flex-wrap'},
+                                        'content': [{
+                                            'component': 'span',
+                                            'props': {'class': 'text-h6'},
+                                            'text': f'{gb:.2f} GB'
+                                        }]
+                                    }
+                                ]
+                            }
+                        ]
+                    }]
+                }]
+            })
+        elements = [{'component': 'VRow', 'content': card_elements}]
+        return cols, attrs, elements
+
     @eventmanager.register(EventType.TransferComplete)
     def handle_transfer_complete(self, event: Event = None):
         """监听整理完成事件，记录文件大小"""
@@ -246,18 +283,18 @@ class TransferSizeStatistic(_PluginBase):
             records = self.get_data("transfer_records") or []
             records.append({"timestamp": now_str, "size": total_size})
             # 清理超过30天的旧记录
-            cutoff = (datetime.now(tz=pytz.timezone(settings.TZ)) - timedelta(days=31)).isoformat()
-            records = [r for r in records if r.get("timestamp", "") > cutoff]
+            cutoff_30d = (datetime.now(tz=pytz.timezone(settings.TZ)) - timedelta(days=30)).isoformat()
+            records = [r for r in records if r.get("timestamp", "") > cutoff_30d]
             self.save_data("transfer_records", records)
 
-        logger.info(f"记录整理文件大小: {total_size / 1073741824:.2f} GB")
+        gb = total_size / 1073741824
+        logger.info(f"记录整理文件大小: {gb:.2f} GB")
 
-        # 检查24h滚动阈值
+        # 阈值检查
         if self._threshold_enabled and self._threshold_gb > 0:
             size_24h = self._calc_size(records, "24h")
             size_24h_gb = size_24h / 1073741824
             if size_24h_gb >= self._threshold_gb:
-                # 防止重复通知：检查是否已通知过
                 last_notify = self.get_data("last_threshold_notify") or ""
                 today_str = datetime.now(tz=pytz.timezone(settings.TZ)).strftime("%Y-%m-%d-%H")
                 if last_notify != today_str:
@@ -270,9 +307,8 @@ class TransferSizeStatistic(_PluginBase):
                     )
 
     def _calc_size(self, records: list, range_key: str) -> int:
-        """计算指定时间范围内的总大小（字节）"""
-        tz = pytz.timezone(settings.TZ)
-        now = datetime.now(tz=tz)
+        """计算指定范围内的文件总大小(bytes)"""
+        now = datetime.now(tz=pytz.timezone(settings.TZ))
         if range_key == "24h":
             cutoff = (now - timedelta(hours=24)).isoformat()
         elif range_key == "today":
@@ -287,21 +323,17 @@ class TransferSizeStatistic(_PluginBase):
 
     def __report(self):
         """定时汇总统计并通知"""
-        if not self._time_ranges:
-            logger.warning("未选择统计范围，跳过")
-            return
         records = self.get_data("transfer_records") or []
-        range_labels = {
-            "24h": "滚动24小时",
-            "today": "今日（自然日）",
-            "7d": "最近7天",
-            "30d": "最近30天"
-        }
+        range_labels = [
+            ("24h", "滚动24小时"),
+            ("today", "今日（自然日）"),
+            ("7d", "最近7天"),
+            ("30d", "最近30天"),
+        ]
         lines = []
-        for rk in self._time_ranges:
+        for rk, label in range_labels:
             total = self._calc_size(records, rk)
             gb = total / 1073741824
-            label = range_labels.get(rk, rk)
             lines.append(f"{label}: {gb:.2f} GB")
 
         text = "\n".join(lines)

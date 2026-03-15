@@ -36,7 +36,7 @@
     "version": "1.1",
     "icon": "statistic.png",
     "author": "jager",
-    "level": 1,
+    "level": 2,
     "history": {
       "v1.1": "修复bug",
       "v1.0": "初始版本"

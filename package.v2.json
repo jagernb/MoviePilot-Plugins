@@ -38,6 +38,7 @@
     "author": "jager",
     "level": 1,
     "history": {
+      "v1.1": "修复bug",
       "v1.0": "初始版本"
     }
   }

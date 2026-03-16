@@ -24,7 +24,7 @@ class TransferSizeStatistic(_PluginBase):
     # 插件图标
     plugin_icon = "statistic.png"
     # 插件版本
-    plugin_version = "2.0"
+    plugin_version = "2.1"
     # 插件作者
     plugin_author = "jager"
     # 作者主页
@@ -44,6 +44,7 @@ class TransferSizeStatistic(_PluginBase):
     _cron = None
     _threshold_enabled = False
     _threshold_gb = 0
+    _clear_data = False
 
     def init_plugin(self, config: dict = None):
         if config:
@@ -53,6 +54,22 @@ class TransferSizeStatistic(_PluginBase):
             self._cron = config.get("cron")
             self._threshold_enabled = config.get("threshold_enabled", False)
             self._threshold_gb = float(config.get("threshold_gb") or 0)
+            self._clear_data = config.get("clear_data", False)
+
+        # 清空历史数据
+        if self._clear_data:
+            self.save_data("transfer_records", [])
+            logger.info("已清空整理文件大小历史记录")
+            self._clear_data = False
+            self.update_config({
+                "enabled": self._enabled,
+                "onlyonce": self._onlyonce,
+                "notify": self._notify,
+                "cron": self._cron,
+                "threshold_enabled": self._threshold_enabled,
+                "threshold_gb": self._threshold_gb,
+                "clear_data": False,
+            })
 
         self.stop_service()
 
@@ -72,6 +89,7 @@ class TransferSizeStatistic(_PluginBase):
                 "cron": self._cron,
                 "threshold_enabled": self._threshold_enabled,
                 "threshold_gb": self._threshold_gb,
+                "clear_data": False,
             })
             if self._scheduler.get_jobs():
                 self._scheduler.print_jobs()
@@ -137,6 +155,14 @@ class TransferSizeStatistic(_PluginBase):
                                     'component': 'VSwitch',
                                     'props': {'model': 'onlyonce', 'label': '立即运行一次'}
                                 }]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 3},
+                                'content': [{
+                                    'component': 'VSwitch',
+                                    'props': {'model': 'clear_data', 'label': '清空历史数据'}
+                                }]
                             }
                         ]
                     },
@@ -194,6 +220,7 @@ class TransferSizeStatistic(_PluginBase):
             "cron": "",
             "threshold_enabled": False,
             "threshold_gb": 0,
+            "clear_data": False,
         }
 
     def get_page(self) -> List[dict]:
@@ -277,17 +304,23 @@ class TransferSizeStatistic(_PluginBase):
         total_size = getattr(transferinfo, "total_size", 0) or 0
         if total_size <= 0:
             return
+        # total_size 是整个批量任务的总大小，需要除以文件数得到单文件大小
+        file_count = getattr(transferinfo, "file_count", 0) or 0
+        if file_count > 1:
+            file_size = total_size / file_count
+        else:
+            file_size = total_size
 
         with lock:
             now_str = datetime.now(tz=pytz.timezone(settings.TZ)).isoformat()
             records = self.get_data("transfer_records") or []
-            records.append({"timestamp": now_str, "size": total_size})
+            records.append({"timestamp": now_str, "size": file_size})
             # 清理超过30天的旧记录
             cutoff_30d = (datetime.now(tz=pytz.timezone(settings.TZ)) - timedelta(days=30)).isoformat()
             records = [r for r in records if r.get("timestamp", "") > cutoff_30d]
             self.save_data("transfer_records", records)
 
-        gb = total_size / 1073741824
+        gb = file_size / 1073741824
         logger.info(f"记录整理文件大小: {gb:.2f} GB")
 
         # 阈值检查

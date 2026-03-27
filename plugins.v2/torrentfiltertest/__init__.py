@@ -25,7 +25,7 @@ class TorrentFilterTest(_PluginBase):
     # 加载顺序
     plugin_order = 99
     # 可使用的用户级别
-    auth_level = 1
+    auth_level = 2
 
     # 配置属性
     _enabled: bool = False

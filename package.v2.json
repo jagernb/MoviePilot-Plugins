@@ -34,11 +34,12 @@
     "name": "种子规则优先级测试",
     "description": "输入种子标题，测试能命中订阅过滤规则的哪个优先级（pri_order），用于排查即时推送不触发的问题",
     "labels": "工具",
-    "version": "1.0",
+    "version": "1.1",
     "icon": "filter.png",
     "author": "jager",
     "level": 2,
     "history": {
+      "v1.1": "修复规则组Key，增加媒体识别分类及RssSubscribe即时推送阈值联动显示",
       "v1.0": "初始版本"
     }
   },

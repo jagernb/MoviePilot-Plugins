@@ -33,7 +33,7 @@ class RssSubscribe(_PluginBase):
     # 插件图标
     plugin_icon = "rss.png"
     # 插件版本
-    plugin_version = "3.025"
+    plugin_version = "3.026"
     # 插件作者
     plugin_author = "jxxghp,jager"
     # 作者主页
@@ -975,6 +975,12 @@ class RssSubscribe(_PluginBase):
                     if self.__check_media_exists(mediainfo, meta):
                         continue
                     instant_priority = self.__get_instant_priority_for_mediainfo(mediainfo)
+                    _category_name = self.__get_mediainfo_category(mediainfo) or '未分类'
+                    if instant_priority > 0 and self._filter:
+                        logger.info(f"{title} 分类：{_category_name}，即时推送阈值：{instant_priority}"
+                                    f"（pri_order 需>={101 - instant_priority}），"
+                                    f"当前 pri_order：{torrentinfo.pri_order}，"
+                                    f"{'触发即时推送' if torrentinfo.pri_order >= (101 - instant_priority) else '不触发即时推送，加入候选池'}")
                     # 即时推送检查：pri_order 达到阈值则立即推送
                     if (instant_priority > 0
                             and self._filter
@@ -1054,7 +1060,7 @@ class RssSubscribe(_PluginBase):
             if not name:
                 continue
             try:
-                normalized[name] = max(0, min(4, int(priority or 0)))
+                normalized[name] = max(0, int(priority or 0))
             except Exception:
                 normalized[name] = 0
         return normalized

@@ -30,6 +30,18 @@
       "v2.0": "兼容MoviePilot V2 版本"
     }
   },
+  "TorrentFilterTest": {
+    "name": "种子规则优先级测试",
+    "description": "输入种子标题，测试能命中订阅过滤规则的哪个优先级（pri_order），用于排查即时推送不触发的问题",
+    "labels": "工具",
+    "version": "1.0",
+    "icon": "filter.png",
+    "author": "jager",
+    "level": 1,
+    "history": {
+      "v1.0": "初始版本"
+    }
+  },
   "TransferSizeStatistic": {
     "name": "整理文件大小统计",
     "description": "统计已整理文件的总大小，仪表盘展示多时间范围数据，支持阈值通知",

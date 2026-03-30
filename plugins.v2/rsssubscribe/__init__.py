@@ -1362,6 +1362,7 @@ class RssSubscribe(_PluginBase):
             resp = requests.get(url, proxies=proxies, timeout=30)
             resp.raise_for_status()
             content = resp.text
+            logger.warn(f"RSS回退抓取响应 status={resp.status_code} content-type={resp.headers.get('content-type')} 前500字符: {content[:500]}")
             # 去除非法XML控制字符（U+0000-U+001F，保留\t\n\r）
             content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', content)
             # 修正未转义的 & （不在已有实体 &amp; &lt; 等内的裸 &）

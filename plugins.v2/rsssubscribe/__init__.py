@@ -5,6 +5,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Optional, Any, List, Dict, Tuple
 import json
+import xml.etree.ElementTree as ET
 
 import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -33,7 +34,7 @@ class RssSubscribe(_PluginBase):
     # 插件图标
     plugin_icon = "rss.png"
     # 插件版本
-    plugin_version = "3.026"
+    plugin_version = "3.027"
     # 插件作者
     plugin_author = "jxxghp,jager"
     # 作者主页
@@ -763,7 +764,7 @@ class RssSubscribe(_PluginBase):
             if not url:
                 continue
             logger.info(f"开始刷新RSS：{url} ...")
-            results = RssHelper().parse(url, proxy=self._proxy)
+            results = self.__parse_rss(url)
             if not results:
                 logger.error(f"未获取到RSS数据：{url}")
                 continue
@@ -887,7 +888,7 @@ class RssSubscribe(_PluginBase):
             if not url:
                 continue
             logger.info(f"开始刷新RSS（候选池模式）：{url} ...")
-            results = RssHelper().parse(url, proxy=self._proxy)
+            results = self.__parse_rss(url)
             if not results:
                 logger.error(f"未获取到RSS数据：{url}")
                 continue
@@ -1346,6 +1347,60 @@ class RssSubscribe(_PluginBase):
             candidate_pool.pop(key, None)
 
         self.save_data('candidate_pool', candidate_pool)
+
+    def __parse_rss(self, url: str) -> List[dict]:
+        """
+        解析RSS，优先使用RssHelper，失败时自行抓取并清洗XML后重试
+        """
+        results = RssHelper().parse(url, proxy=self._proxy)
+        if results:
+            return results
+        # 回退：手动抓取并清洗非标准XML
+        try:
+            import requests
+            proxies = settings.PROXY if self._proxy else None
+            resp = requests.get(url, proxies=proxies, timeout=30)
+            resp.raise_for_status()
+            content = resp.text
+            # 去除非法XML控制字符（U+0000-U+001F，保留\t\n\r）
+            content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', content)
+            # 修正未转义的 & （不在已有实体 &amp; &lt; 等内的裸 &）
+            content = re.sub(r'&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)', '&amp;', content)
+            root = ET.fromstring(content.encode('utf-8'))
+            ns = {'media': 'http://search.yahoo.com/mrss/',
+                  'torrent': 'http://xmlns.ezrss.it/0.1/',
+                  'content': 'http://purl.org/rss/1.0/modules/content/'}
+            items = root.findall('.//item')
+            ret = []
+            for item in items:
+                def _t(tag):
+                    el = item.find(tag)
+                    return el.text.strip() if el is not None and el.text else None
+                enclosure_el = item.find('enclosure')
+                enclosure = enclosure_el.get('url') if enclosure_el is not None else None
+                size = enclosure_el.get('length') if enclosure_el is not None else None
+                pubdate_str = _t('pubDate')
+                pubdate = None
+                if pubdate_str:
+                    try:
+                        from email.utils import parsedate_to_datetime
+                        pubdate = parsedate_to_datetime(pubdate_str)
+                    except Exception:
+                        pass
+                ret.append({
+                    'title': _t('title'),
+                    'description': _t('description'),
+                    'enclosure': enclosure,
+                    'link': _t('link'),
+                    'size': int(size) if size and size.isdigit() else 0,
+                    'pubdate': pubdate,
+                })
+            if ret:
+                logger.info(f"RSS回退解析成功，共 {len(ret)} 条：{url}")
+            return ret
+        except Exception as e:
+            logger.error(f"RSS回退解析失败：{url} - {e}")
+            return []
 
     def __log_and_notify_error(self, message):
         """

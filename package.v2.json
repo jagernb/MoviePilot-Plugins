@@ -60,6 +60,18 @@
       "v1.0": "初始版本"
     }
   },
+  "MediaServerRefresh": {
+    "name": "媒体库服务器刷新",
+    "description": "整理完成后等待 rclone 日志确认 upload succeeded，再刷新 Emby/Jellyfin/Plex 媒体库",
+    "labels": "整理,媒体库",
+    "version": "1.4.0",
+    "icon": "refresh.png",
+    "author": "jxxghp，Claude",
+    "level": 2,
+    "history": {
+      "v1.4.0": "新增 rclone 日志驱动刷新：仅在检测到 upload succeeded 后才刷新媒体库，避免本地复制完成即过早刷新"
+    }
+  },
   "VarietyEpisodeRemap": {
     "name": "综艺集数映射整理",
     "description": "按自定义映射修正综艺整理目标命名使用的季集编号，不修改源文件名",

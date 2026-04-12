@@ -62,14 +62,15 @@
   },
   "MediaServerRefresh": {
     "name": "媒体库服务器刷新",
-    "description": "整理完成后等待 rclone 日志确认 upload succeeded，再刷新 Emby/Jellyfin/Plex 媒体库",
+    "description": "整理完成后等待 rclone 日志确认 upload succeeded，再刷新 Emby/Jellyfin/Plex 媒体库；媒体库挂载前缀可留空，留空时自动从目标路径中的 Media/ 段匹配",
     "labels": "整理,媒体库",
-    "version": "1.4.0",
+    "version": "1.4.1",
     "icon": "refresh.png",
     "author": "jxxghp，Claude",
     "level": 2,
     "history": {
-      "v1.4.0": "新增 rclone 日志驱动刷新：仅在检测到 upload succeeded 后才刷新媒体库，避免本地复制完成即过早刷新"
+      "v1.4.1": "优化刷新回退策略：优先按条目刷新，不支持条目刷新时改为只刷新命中路径对应的媒体库；媒体库挂载前缀支持留空自动匹配 Media/ 段",
+      "v1.4.0": "新增 rclone 日志驱动刷新：仅在检测到 upload succeeded 后才刷新媒体库，优先按条目刷新，不支持条目刷新时尝试只刷新命中路径对应的媒体库"
     }
   },
   "VarietyEpisodeRemap": {

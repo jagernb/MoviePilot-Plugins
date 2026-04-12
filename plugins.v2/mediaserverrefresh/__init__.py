@@ -31,7 +31,7 @@ class MediaServerRefresh(_PluginBase):
     plugin_name = "媒体库服务器刷新"
     plugin_desc = "整理完成后先等待 rclone 日志确认上传成功，再刷新 Emby/Jellyfin/Plex 媒体库。"
     plugin_icon = "refresh.png"
-    plugin_version = "1.4.0"
+    plugin_version = "1.4.1"
     plugin_author = "jxxghp, Claude"
     author_url = "https://github.com/anthropics/claude-code"
     plugin_config_prefix = "mediaserverrefresh_"
@@ -216,8 +216,8 @@ class MediaServerRefresh(_PluginBase):
                                     "component": "VTextField",
                                     "props": {
                                         "model": "library_path_prefix",
-                                        "label": "媒体库挂载前缀",
-                                        "placeholder": "/CloudNAS/CloudDrive/rclone",
+                                        "label": "媒体库挂载前缀（可选）",
+                                        "placeholder": "留空时自动从路径里的 Media/ 开始匹配",
                                     }
                                 }]
                             },
@@ -319,7 +319,7 @@ class MediaServerRefresh(_PluginBase):
                                 "props": {
                                     "type": "info",
                                     "variant": "tonal",
-                                    "text": "插件只在 rclone 日志中检测到 upload succeeded 后才刷新媒体库，Copied (new) 不会触发刷新。"
+                                    "text": "插件只在 rclone 日志中检测到 upload succeeded 后才刷新媒体库。优先按条目刷新；若不支持条目刷新，则尝试只刷新命中路径对应的媒体库。媒体库挂载前缀可留空，留空时会自动从整理目标路径中的 Media/ 段开始匹配；Copied (new) 不会触发刷新。"
                                 }
                             }]
                         }]
@@ -568,6 +568,7 @@ class MediaServerRefresh(_PluginBase):
         if not refresh_items:
             return False
 
+        library_paths = self.__collect_library_paths(ready_items)
         refreshed = False
         for name, service in services.items():
             try:
@@ -576,12 +577,10 @@ class MediaServerRefresh(_PluginBase):
                     instance.refresh_library_by_items(refresh_items)
                     refreshed = True
                     logger.info("[MediaServerRefresh] 已按条目刷新媒体服务器：%s，条目数=%s", name, len(refresh_items))
-                elif hasattr(instance, "refresh_root_library"):
-                    instance.refresh_root_library()
+                elif self.__refresh_service_libraries(instance, name, library_paths):
                     refreshed = True
-                    logger.info("[MediaServerRefresh] 已刷新媒体服务器根库：%s", name)
                 else:
-                    logger.warning("[MediaServerRefresh] 媒体服务器 %s 不支持刷新接口", name)
+                    logger.warning("[MediaServerRefresh] 媒体服务器 %s 不支持条目刷新，也未发现库级刷新接口，已跳过", name)
             except Exception as err:
                 logger.error("[MediaServerRefresh] 刷新媒体服务器 %s 失败：%s", name, err)
 
@@ -598,6 +597,58 @@ class MediaServerRefresh(_PluginBase):
                 kept_items.append(item)
             self.__save_pending_items(kept_items)
         return True
+
+    def __collect_library_paths(self, ready_items: List[Dict[str, Any]]) -> List[str]:
+        library_paths = []
+        seen = set()
+        for item in ready_items:
+            target_path = self.__normalize_path(item.get("target_path") or "")
+            library_path = self.__extract_library_root(target_path)
+            if not library_path or library_path in seen:
+                continue
+            seen.add(library_path)
+            library_paths.append(library_path)
+        return library_paths
+
+    def __extract_library_root(self, target_path: str) -> str:
+        if not target_path:
+            return ""
+        normalized = self.__normalize_path(target_path)
+        parts = [part for part in normalized.split("/") if part]
+        if not parts:
+            return ""
+        try:
+            media_index = next(i for i, part in enumerate(parts) if part.lower() == "media")
+        except StopIteration:
+            return ""
+        if len(parts) <= media_index + 2:
+            return ""
+        root_parts = parts[:media_index + 3]
+        prefix = "/" if normalized.startswith("/") else ""
+        return prefix + "/".join(root_parts)
+
+    def __refresh_service_libraries(self, instance: Any, service_name: str, library_paths: List[str]) -> bool:
+        if not library_paths:
+            return False
+
+        if hasattr(instance, "refresh_library_by_paths"):
+            instance.refresh_library_by_paths(library_paths)
+            logger.info("[MediaServerRefresh] 已按库路径刷新媒体服务器：%s，库数=%s", service_name, len(library_paths))
+            return True
+
+        if hasattr(instance, "refresh_library_by_path"):
+            for library_path in library_paths:
+                instance.refresh_library_by_path(library_path)
+            logger.info("[MediaServerRefresh] 已逐个按库路径刷新媒体服务器：%s，库数=%s", service_name, len(library_paths))
+            return True
+
+        if hasattr(instance, "refresh_library"):
+            for library_path in library_paths:
+                instance.refresh_library(library_path)
+            logger.info("[MediaServerRefresh] 已调用 refresh_library 刷新媒体服务器：%s，库数=%s", service_name, len(library_paths))
+            return True
+
+        return False
 
     def __expire_pending_items(self) -> bool:
         now = datetime.now(tz=pytz.timezone(settings.TZ))
@@ -681,6 +732,11 @@ class MediaServerRefresh(_PluginBase):
             return self.__normalize_relative_path(relative_path)
         if prefix and normalized_target == prefix.rstrip("/"):
             return ""
+
+        media_match = re.search(r"(?i)(^|/)Media/(?P<tail>.+)$", normalized_target)
+        if media_match:
+            return self.__normalize_relative_path(f"Media/{media_match.group('tail')}")
+
         return self.__normalize_relative_path(normalized_target)
 
     def __find_pending_index(self, pending_items: List[Dict[str, Any]], target_path: str, relative_path: str) -> Optional[int]:

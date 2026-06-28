@@ -20,11 +20,12 @@
     "name": "自动删种辅种版",
     "description": "自动删除下载器中的下载任务,所有辅种满足条件后自动删除。",
     "labels": "做种",
-    "version": "2.3",
+    "version": "2.3.1",
     "icon": "delete.jpg",
     "author": "jxxghp，jager",
     "level": 2,
     "history": {
+      "v2.3.1": "修复不可用",
       "v2.3": "添加最后活动时间作为新的判断条件",
       "v2.2": "优化执行周期输入，需要MoviePilot v2.2.1+",
       "v2.1.1": "修复兼容MoviePilot V2 版本",

@@ -26,7 +26,7 @@ class TorrentRemover(_PluginBase):
     # 插件图标
     plugin_icon = "delete.jpg"
     # 插件版本
-    plugin_version = "2.3"
+    plugin_version = "2.3.1"
     # 插件作者
     plugin_author = "jxxghp,jager"
     # 作者主页
@@ -805,7 +805,8 @@ class TorrentRemover(_PluginBase):
         检查TR下载任务是否符合条件
         """
         # 完成时间
-        date_done = torrent.date_done or torrent.date_added
+        date_done = getattr(torrent, "done_date", None) or getattr(torrent, "date_done", None) \
+            or getattr(torrent, "added_date", None) or getattr(torrent, "date_added", None)
         # 现在时间
         date_now = int(time.mktime(datetime.now().timetuple()))
         # 做种时间
@@ -844,7 +845,7 @@ class TorrentRemover(_PluginBase):
             return None
         # 最后活动时间 单位：小时
         if self._lastactive:
-            activity_date = torrent.activity_date or date_done
+            activity_date = getattr(torrent, "activity_date", None) or date_done
             inactive_time = date_now - int(time.mktime(activity_date.timetuple())) if activity_date else 0
             if inactive_time <= float(self._lastactive) * 3600:
                 return None
